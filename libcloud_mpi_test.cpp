@@ -1,6 +1,7 @@
 #include <libcloudph++/lgrngn/factory.hpp>
 #include <boost/assign/ptr_map_inserter.hpp>
 #include <stdio.h>
+#include <stdlib.h>
 #include <libcloudph++/common/hydrostatic.hpp>
 #include <libcloudph++/common/theta_std.hpp>
 #include <libcloudph++/common/theta_dry.hpp>
@@ -105,11 +106,12 @@ void test(backend_t backend, int ndims, bool dir)
 {
   int rank = -1;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+/*
   if(rank>1)
   {
     throw std::runtime_error("This test doesn't work for more than 2 mpi processes\n");
   }
-
+*/
   if(rank==0)
   {
 //    std::cout << std::endl << " ------------------------------------ " << std::endl;
@@ -123,8 +125,8 @@ void test(backend_t backend, int ndims, bool dir)
   opts_init.kernel = kernel_t::geometric;
   opts_init.terminal_velocity = vt_t::beard76;
   opts_init.dx = 1;
-  opts_init.nx = nx_factor*(rank+1); 
-  opts_init.x1 = nx_factor*(rank+1);
+  opts_init.nx = nx_factor/2*(rank/2+1); 
+  opts_init.x1 = nx_factor/2*(rank/2+1);
   opts_init.sd_conc = 64;
   opts_init.n_sd_max = 1000*opts_init.sd_conc;
   opts_init.rng_seed = 4444;// + rank;
@@ -140,8 +142,9 @@ void test(backend_t backend, int ndims, bool dir)
     opts_init.ny = 5; 
     opts_init.y1 = 5; 
   }
-  opts_init.dev_id = rank; 
-//  std::cout << opts_init.dev_id << std::endl;
+  opts_init.dev_id = rank%2; 
+  //opts_init.dev_id = rank; 
+  std::cout << opts_init.dev_id << std::endl;
 //  opts_init.sd_const_multi = 1;
 
 /*
@@ -187,10 +190,10 @@ void test(backend_t backend, int ndims, bool dir)
   double pCz[] = {0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0. ,0.};
   double pCy[] = {0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0. ,0.};
   //long int strides[] = {sizeof(double)};
-  long int strides[] = {1, 1, 1};
-  long int xstrides[] = {1, 1, 1};
-  long int ystrides[] = {1, 1, 1};
-  long int zstrides[] = {1, 1, 1};
+  long int strides[] = {0, 1, 1};
+  long int xstrides[] = {0, 1, 1};
+  long int ystrides[] = {0, 1, 1};
+  long int zstrides[] = {0, 1, 1};
 
 /*
   arrinfo_t<double> th(pth, strides);
@@ -219,7 +222,7 @@ void test(backend_t backend, int ndims, bool dir)
   opts.adve = 0;
   opts.sedi = 0;
   opts.cond = 0;
-  opts.coal = 1;
+  opts.coal = 0; //1
 //  opts.chem = 0;
 
 
@@ -232,16 +235,19 @@ void test(backend_t backend, int ndims, bool dir)
 */
   MPI_Barrier(MPI_COMM_WORLD);
   
-
+/*
   for(int i=0;i<70;++i)
   {
 //    if(rank==0)
+std::cerr << "pure coal step no " << i << std::endl;
       two_step(prtcls,th,rhod,rv,Cx, ndims==2 ? arrinfo_t<double>() : Cy, Cz, opts);
 //   //   MPI_Barrier(MPI_COMM_WORLD);
   //  if(rank==1)
    //   two_step(prtcls,th,rhod,rv,opts);
 //   // MPI_Barrier(MPI_COMM_WORLD);
+std::cerr << "pure coal DONE step no " << i << std::endl;
   }
+*/
   prtcls->diag_all();
   prtcls->diag_sd_conc();
   out = prtcls->outbuf();
@@ -251,18 +257,22 @@ void test(backend_t backend, int ndims, bool dir)
 */
 
   MPI_Barrier(MPI_COMM_WORLD);
-  std::vector<double> sd_conc_global_post_coal(3*nx_factor*opts_init.nz * m1(opts_init.ny));
-  std::vector<double> sd_conc_global_post_adve(3*nx_factor*opts_init.nz * m1(opts_init.ny));
+  std::vector<double> sd_conc_global_post_coal(6*nx_factor*opts_init.nz * m1(opts_init.ny));
+  std::vector<double> sd_conc_global_post_adve(6*nx_factor*opts_init.nz * m1(opts_init.ny));
   
-  std::vector<int> recvcount = {nx_factor*opts_init.nz * m1(opts_init.ny),2*nx_factor*opts_init.nz * m1(opts_init.ny)};
-  std::vector<int> displs = {0,recvcount[0]};
+  std::vector<int> recvcount = {nx_factor*opts_init.nz * m1(opts_init.ny),2*nx_factor*opts_init.nz * m1(opts_init.ny),3*nx_factor*opts_init.nz * m1(opts_init.ny)};
+  std::vector<int> displs = {0,recvcount[0],recvcount[1]};
   MPI_Gatherv(out, opts_init.nx * opts_init.nz * m1(opts_init.ny), MPI_DOUBLE, sd_conc_global_post_coal.data(), recvcount.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 
   opts.coal = 0;
   opts.adve = 1;
   for(int i=0; i<nx_factor*3*5; ++i)
+{
+    std::cerr << "pure adve step no " << i << std::endl;
     two_step(prtcls,th,rhod,rv,Cx, ndims==2 ? arrinfo_t<double>() : Cy, Cz, opts);
+    std::cerr << "pure adve DONE step no " << i << std::endl;
+}
   prtcls->diag_all();
   prtcls->diag_sd_conc();
   out = prtcls->outbuf();
@@ -279,11 +289,15 @@ void test(backend_t backend, int ndims, bool dir)
 }
 
 int main(int argc, char *argv[]){
+  system("/bin/hostname");
   int provided_thread_lvl;
   MPI_Init_thread(nullptr, nullptr, MPI_THREAD_MULTIPLE, &provided_thread_lvl);
   printf("provided thread lvl: %d\n", provided_thread_lvl);
 
-  auto backends = {backend_t(serial), backend_t(CUDA), backend_t(multi_CUDA)};
+//  auto backends = {backend_t(serial), backend_t(CUDA), backend_t(multi_CUDA)};
+//  auto backends = {backend_t(CUDA), backend_t(multi_CUDA)};
+  auto backends = {backend_t(CUDA)};
+  //auto backends = {backend_t(multi_CUDA)};
   for(auto back: backends)
   {
     // 1d doesnt work with MPI
