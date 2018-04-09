@@ -222,7 +222,7 @@ void test(backend_t backend, int ndims, bool dir)
   opts.adve = 0;
   opts.sedi = 0;
   opts.cond = 0;
-  opts.coal = 0; //1
+  opts.coal = 1;
 //  opts.chem = 0;
 
 
@@ -235,7 +235,6 @@ void test(backend_t backend, int ndims, bool dir)
 */
   MPI_Barrier(MPI_COMM_WORLD);
   
-/*
   for(int i=0;i<70;++i)
   {
 //    if(rank==0)
@@ -247,21 +246,20 @@ std::cerr << "pure coal step no " << i << std::endl;
 //   // MPI_Barrier(MPI_COMM_WORLD);
 std::cerr << "pure coal DONE step no " << i << std::endl;
   }
-*/
+
   prtcls->diag_all();
   prtcls->diag_sd_conc();
   out = prtcls->outbuf();
-/*
+
   printf("---sd_conc po coal---\n");
-  printf("%d: %lf %lf %lf %lf\n",rank, out[0], out[1], out[2], out[3]);
-*/
+  printf("%d: %lf %lf %lf %lf %lf %lf\n",rank, out[0], out[1], out[2], out[3], out[4], out[5]);
 
   MPI_Barrier(MPI_COMM_WORLD);
-  std::vector<double> sd_conc_global_post_coal(6*nx_factor*opts_init.nz * m1(opts_init.ny));
-  std::vector<double> sd_conc_global_post_adve(6*nx_factor*opts_init.nz * m1(opts_init.ny));
+  std::vector<double> sd_conc_global_post_coal(3*nx_factor*opts_init.nz * m1(opts_init.ny));
+  std::vector<double> sd_conc_global_post_adve(3*nx_factor*opts_init.nz * m1(opts_init.ny));
   
-  std::vector<int> recvcount = {nx_factor*opts_init.nz * m1(opts_init.ny),2*nx_factor*opts_init.nz * m1(opts_init.ny),3*nx_factor*opts_init.nz * m1(opts_init.ny)};
-  std::vector<int> displs = {0,recvcount[0],recvcount[1]};
+  std::vector<int> recvcount = {0.5*nx_factor*opts_init.nz * m1(opts_init.ny),0.5*nx_factor*opts_init.nz * m1(opts_init.ny),nx_factor*opts_init.nz * m1(opts_init.ny),nx_factor*opts_init.nz * m1(opts_init.ny)};
+  std::vector<int> displs = {0,recvcount[0],recvcount[0] + recvcount[1], recvcount[0] + recvcount[1] + recvcount[2]};
   MPI_Gatherv(out, opts_init.nx * opts_init.nz * m1(opts_init.ny), MPI_DOUBLE, sd_conc_global_post_coal.data(), recvcount.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 
@@ -276,6 +274,9 @@ std::cerr << "pure coal DONE step no " << i << std::endl;
   prtcls->diag_all();
   prtcls->diag_sd_conc();
   out = prtcls->outbuf();
+
+  printf("---sd_conc po adve---\n");
+  printf("%d: %lf %lf %lf %lf %lf %lf\n",rank, out[0], out[1], out[2], out[3], out[4], out[5]);
 
   MPI_Barrier(MPI_COMM_WORLD);
 
