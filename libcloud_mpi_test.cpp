@@ -212,11 +212,11 @@ void test(backend_t backend, int ndims, bool dir)
   arrinfo_t<double> Cy(vCy.data(), ystrides);
 
   if(ndims==1)
-    prtcls->init(th,rv,rhod, Cx);
+    prtcls->init(th,rv,rhod, arrinfo_t<double>(), Cx);
   else if(ndims==2)
-    prtcls->init(th,rv, rhod, Cx, arrinfo_t<double>(), Cz);
+    prtcls->init(th,rv, rhod, arrinfo_t<double>(), Cx, arrinfo_t<double>(), Cz);
   else if(ndims==3)
-    prtcls->init(th,rv, rhod, Cx, Cy, Cz);
+    prtcls->init(th,rv, rhod, arrinfo_t<double>(), Cx, Cy, Cz);
 
   opts_t<double> opts;
   opts.adve = 0;
