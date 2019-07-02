@@ -9,6 +9,7 @@
 #include <libcloudph++/common/unary_function.hpp>
 #include <iostream>
 #include "mpi.h"
+#include <numeric>
 
 
 using namespace std;
@@ -29,42 +30,6 @@ using namespace libcloudphxx::lgrngn;
     n1_stp = double(60e6) / si::cubic_metres,
     n2_stp = double(40e6) / si::cubic_metres;
 
-
-/*
-  // lognormal aerosol distribution
-  template <typename T>
-  struct log_dry_radii : public libcloudphxx::common::unary_function<T>
-  {
-    const quantity<si::length, real_t> mean_rd1, mean_rd2;
-    const quantity<si::dimensionless, real_t> sdev_rd1, sdev_rd2;
-    const quantity<power_typeof_helper<si::length, static_rational<-3>>::type, real_t> n1_stp, n2_stp;
-
-    log_dry_radii(
-      quantity<si::length, real_t> mean_rd1,
-      quantity<si::length, real_t> mean_rd2,
-      quantity<si::dimensionless, real_t> sdev_rd1,
-      quantity<si::dimensionless, real_t> sdev_rd2,
-      quantity<power_typeof_helper<si::length, static_rational<-3>>::type, real_t> n1_stp,
-      quantity<power_typeof_helper<si::length, static_rational<-3>>::type, real_t> n2_stp
-    ):
-    mean_rd1(mean_rd1),
-    mean_rd2(mean_rd2),
-    sdev_rd1(sdev_rd1),
-    sdev_rd2(sdev_rd2),
-    n1_stp(n1_stp),
-    n2_stp(n2_stp) {}
-
-
-    T funval(const T lnrd) const
-    {
-      return T((
-          lognormal::n_e(mean_rd1, sdev_rd1, n1_stp, quantity<si::dimensionless, real_t>(lnrd)) +
-          lognormal::n_e(mean_rd2, sdev_rd2, n2_stp, quantity<si::dimensionless, real_t>(lnrd)) 
-        ) * si::cubic_metres
-      );
-    }
-  };
-*/
 
 // lognormal aerosol distribution
 template <typename T>
@@ -100,25 +65,17 @@ int m1(int a)
 }
 
 
-//const int nx_factor = 6;
-const int nx_min = 3;
+const int nx_min = 2;
 
-void test(backend_t backend, int ndims, bool dir, int n_devices) // n_devices - number of GPUs used per node, each has to be controlled by a single process
+void test(backend_t backend, std::string back_name, int ndims, bool dir, int n_devices) // n_devices - number of GPUs used per node, each has to be controlled by a single process
 {
   int rank = -1;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   int size = -1;
-  MPI_Comm_size( MPI_Comm comm, &size ) 
-/*
-  if(rank>1)
-  {
-    throw std::runtime_error("This test doesn't work for more than 2 mpi processes\n");
-  }
-*/
+  MPI_Comm_size( MPI_COMM_WORLD, &size ); 
   if(rank==0)
   {
-//    std::cout << std::endl << " ------------------------------------ " << std::endl;
-    std::cout << "ndims: " << ndims <<  " direction: " << dir << " backend: " << backend << std::endl;
+    std::cerr << "ndims: " << ndims <<  " direction: " << dir << " backend: " << back_name << " n_devices: " << n_devices << std::endl;
   } 
   MPI_Barrier(MPI_COMM_WORLD);
 
@@ -129,22 +86,24 @@ void test(backend_t backend, int ndims, bool dir, int n_devices) // n_devices - 
   opts_init.terminal_velocity = vt_t::beard76;
   opts_init.dx = 1;
   opts_init.nx = rank+nx_min;// nx_factor/2*(rank/2+1); // previously, two GPUs on the same node had the same nx - why? 
-  int nx_total = (nx_min. + (nx_min. + size - 1)) / 2. * size;
+  int nx_total = (nx_min + (nx_min + size - 1)) / 2. * size;
+  //opts_init.nx = nx_min;
+  //int nx_total = nx_min * size;
   opts_init.x1 = opts_init.nx * opts_init.dx;// nx_factor/2*(rank/2+1);
   opts_init.sd_conc = 64;
   opts_init.n_sd_max = 1000*opts_init.sd_conc;
-  opts_init.rng_seed = 4444;// + rank;
+  opts_init.rng_seed = 4444 + rank;
   if(ndims>1)
   {
     opts_init.dz = 1; 
-    opts_init.nz = 4; 
-    opts_init.z1 = 4; 
+    opts_init.nz = 3; 
+    opts_init.z1 = opts_init.nz * opts_init.dz;
   }
   if(ndims==3)
   {
     opts_init.dy = 1; 
-    opts_init.ny = 5; 
-    opts_init.y1 = 5; 
+    opts_init.ny = 4; 
+    opts_init.y1 = opts_init.ny * opts_init.dy;
   }
   opts_init.dev_id = rank%n_devices; 
   //opts_init.dev_id = rank; 
@@ -168,11 +127,6 @@ void test(backend_t backend, int ndims, bool dir, int n_devices) // n_devices - 
 
   particles_proto_t<double> *prtcls;
 
-/*
-  printf("nx = %d\n", opts_init.nx);
-  printf("ny = %d\n", opts_init.ny);
-  printf("nz = %d\n", opts_init.nz);
-*/
   prtcls = factory<double>(
     backend,
     opts_init
@@ -186,29 +140,10 @@ void test(backend_t backend, int ndims, bool dir, int n_devices) // n_devices - 
   std::vector<double> vCy((opts_init.nx + 2) * (m1(opts_init.ny+1)) * opts_init.nz, 0);
   std::vector<double> vCz((opts_init.nx + 2) * m1(opts_init.ny) * (opts_init.nz+1), 0);
 
-/*
-  double pth[] = {300., 300., 300., 300.};
-  double prhod[] = {1.225, 1.225, 1.225, 1.225};
-  double prv[] = {.01, 0.01, 0.01, 0.01};
-  double pCxm[] = {-1, -1, -1, -1, -1, -1, -1};
-  double pCxp[] = {1, 1, 1, 1, 1, 1, 1};
-  double pCz[] = {0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0. ,0.};
-  double pCy[] = {0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0. ,0.};
-*/
-  //long int strides[] = {sizeof(double)};
   long int strides[] = {0, 1, 1};
   long int xstrides[] = {0, 1, 1};
   long int ystrides[] = {0, 1, 1};
   long int zstrides[] = {0, 1, 1};
-
-/*
-  arrinfo_t<double> th(pth, strides);
-  arrinfo_t<double> rhod(prhod, strides);
-  arrinfo_t<double> rv(prv, strides);
-  arrinfo_t<double> Cx( dir ? pCxm : pCxp, xstrides);
-  arrinfo_t<double> Cz(pCz, ystrides);
-  arrinfo_t<double> Cy(pCy, ystrides);
-*/
 
   arrinfo_t<double> th(vth.data(), strides);
   arrinfo_t<double> rhod(vrhod.data(), strides);
@@ -235,136 +170,155 @@ void test(backend_t backend, int ndims, bool dir, int n_devices) // n_devices - 
   prtcls->diag_all();
   prtcls->diag_sd_conc();
   double *out = prtcls->outbuf();
-/*
-  printf("---sd_conc init---\n");
-  printf("%d: %lf %lf %lf %lf\n",rank, out[0], out[1], out[2], out[3]);
-*/
+
   MPI_Barrier(MPI_COMM_WORLD);
   
   for(int i=0;i<70;++i)
-  {
-//    if(rank==0)
-    std::cerr << "pure coal step no " << i << std::endl;
     two_step(prtcls,th,rhod,rv,Cx, ndims==2 ? arrinfo_t<double>() : Cy, Cz, opts);
-//   //   MPI_Barrier(MPI_COMM_WORLD);
-  //  if(rank==1)
-   //   two_step(prtcls,th,rhod,rv,opts);
-//   // MPI_Barrier(MPI_COMM_WORLD);
-    std::cerr << "pure coal DONE step no " << i << std::endl;
-  }
 
   prtcls->diag_all();
   prtcls->diag_sd_conc();
   out = prtcls->outbuf();
 
-  printf("---sd_conc po coal---\n");
+  int n_cell = opts_init.nx * m1(opts_init.ny) * opts_init.nz;
+  int n_cell_tot = nx_total * m1(opts_init.ny) * opts_init.nz;
+
   // sequential output
-  for(int i = 0; i < s; ++i)
+  /*
+  for(int i = 0; i < size; ++i)
   {
     if(i == rank)
     {
+      printf("---sd_conc po coal---\n");
       printf("%d:",rank);
-      for(int j = 0; j < opts_init.nx; ++j)
+      for(int j = 0; j < n_cell; ++j)
         printf(" %lf", out[j]);
       printf("\n");
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
+  */
 
   std::vector<double> sd_conc_global_post_coal(nx_total * opts_init.nz * m1(opts_init.ny));
   std::vector<double> sd_conc_global_post_adve(nx_total * opts_init.nz * m1(opts_init.ny));
   
   std::vector<int> recvcount(size), displs(size);
+
   std::iota(recvcount.begin(), recvcount.end(), nx_min); 
-  std::transform(recvcount.begin(), recvcount.end(), recvcount.begin(), [](auto& c){return c*opts_init.nz * m1(opts_init.ny);}
-  std::exclusive_scan(recvcount.begin(), recvcount.end(), displs.begin(), 0);
+  std::transform(recvcount.begin(), recvcount.end(), recvcount.begin(), [opts_init](auto& c){return c*opts_init.nz * m1(opts_init.ny);});
+  //std::fill(recvcount.begin(), recvcount.end(), nx_min); 
+
+  std::partial_sum(recvcount.begin(), recvcount.end()-1, displs.begin()+1);
+  displs[0] = 0;
   MPI_Gatherv(out, opts_init.nx * opts_init.nz * m1(opts_init.ny), MPI_DOUBLE, sd_conc_global_post_coal.data(), recvcount.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 
   opts.coal = 0;
   opts.adve = 1;
+
   for(int i=0; i<nx_total; ++i)
-  {
-    std::cerr << "pure adve step no " << i << std::endl;
     two_step(prtcls,th,rhod,rv,Cx, ndims==2 ? arrinfo_t<double>() : Cy, Cz, opts);
-    std::cerr << "pure adve DONE step no " << i << std::endl;
-  }
+
   prtcls->diag_all();
   prtcls->diag_sd_conc();
   out = prtcls->outbuf();
 
-  printf("---sd_conc po adve---\n");
-  for(int i = 0; i < s; ++i)
+  // sequential output
+  /*
+  for(int i = 0; i < size; ++i)
   {
     if(i == rank)
     {
+      printf("---sd_conc po adve---\n");
       printf("%d:",rank);
-      for(int j = 0; j < opts_init.nx; ++j)
+      for(int j = 0; j < n_cell; ++j)
         printf(" %lf", out[j]);
       printf("\n");
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
+  */
 
   MPI_Gatherv(out, opts_init.nx * opts_init.nz * m1(opts_init.ny), MPI_DOUBLE, sd_conc_global_post_adve.data(), recvcount.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
   if(rank==0)
   {
+    std::cerr << "sd_conc_global_post_coal: { ";
+    for(auto val: sd_conc_global_post_coal)
+      std::cerr << val << ", ";
+    std::cerr << "}" << std::endl;
+
+    std::cerr << "sd_conc_global_post_adve: { ";
+    for(auto val: sd_conc_global_post_adve)
+      std::cerr << val << ", ";
+    std::cerr << "}" << std::endl;
+
     if(sd_conc_global_post_coal != sd_conc_global_post_adve)
       throw std::runtime_error("error in advection\n");
   }
 }
 
 int main(int argc, char *argv[]){
+
+  int provided_thread_lvl;
+  MPI_Init_thread(nullptr, nullptr, MPI_THREAD_MULTIPLE, &provided_thread_lvl);
+
   std::cout << "hostname: ";
   system("/bin/hostname");
 
+  printf("provided thread lvl: %d\n", provided_thread_lvl);
+
 // parsing arguments
 
-  int n_devices;
-  int cuda;
+  int n_devices = 1, cuda = 0, opt;
 //  int nsecs, tfnd;
 //
 //  nsecs = 0;
 //  tfnd = 0;
 //  flags = 0;
-  while ((opt = getopt(argc, argv, "cd:")) != -1) {
+  while ((opt = getopt(argc, argv, "c:d:")) != -1) {
       switch (opt) {
       case 'd':
-          nsecs = atoi(optarg);
+          printf("optarg = %s\n", optarg);
+          n_devices = atoi(optarg);
+          if(n_devices < 1) throw std::runtime_error("Number of devices (-d option) needs to be greater than 0");
           break;
       case 'c':
+          printf("optarg = %s\n", optarg);
           cuda = atoi(optarg);
           break;
       default: /* '?' */
-          fprintf(stderr, "Usage: %s -d number_of_devices_per_node\n",
+          fprintf(stderr, "Usage: %s [-d number_of_devices_per_node] [-c should cuda be used (bool)]\n",
                   argv[0]);
           exit(EXIT_FAILURE);
       }
   }
 
 
-  int provided_thread_lvl;
-  MPI_Init_thread(nullptr, nullptr, MPI_THREAD_MULTIPLE, &provided_thread_lvl);
-  printf("provided thread lvl: %d\n", provided_thread_lvl);
 
   std::vector<backend_t> backends = {backend_t(serial), backend_t(OpenMP)};
   if(cuda)
     backends.push_back(backend_t(CUDA));
+
+  std::map<backend_t, std::string> back_names = {
+    { backend_t(serial), "serial" },
+    { backend_t(OpenMP), "OpenMP" },
+    { backend_t(CUDA), "CUDA" }
+  };
 
   for(auto back: backends)
   {
     // 1d doesnt work with MPI
     // 2D
   MPI_Barrier(MPI_COMM_WORLD);
-    test(back, 2, false, n_devices);
+    test(back, back_names[back], 2, false, n_devices);
   MPI_Barrier(MPI_COMM_WORLD);
-    test(back, 2, true, n_devices);
+    test(back, back_names[back], 2, true, n_devices);
   MPI_Barrier(MPI_COMM_WORLD);
     // 3D
-    test(back, 3, false, n_devices);
+    test(back, back_names[back], 3, false, n_devices);
   MPI_Barrier(MPI_COMM_WORLD);
-    test(back, 3, true, n_devices);
+    test(back, back_names[back], 3, true, n_devices);
   MPI_Barrier(MPI_COMM_WORLD);
   }
   MPI_Finalize();
